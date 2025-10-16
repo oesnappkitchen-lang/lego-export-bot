@@ -3,7 +3,8 @@ name: Lego Export (scheduled)
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "30 6 * * *"  # هر روز 06:30 UTC
+    # هر روز 06:30 UTC (مثلاً 10:00 ایرانِ +3:30)
+    - cron: "30 6 * * *"
 
 jobs:
   run-export:
@@ -11,24 +12,28 @@ jobs:
     timeout-minutes: 30
 
     env:
-      BASE_URL: https://timekeepingkasra.snapp.cab/Lego.Web/
-      USERNAME: k9100123
-      PASSWORD: 0069494411
+      # Playwright باید headless اجرا شود
+      HEADLESS: "1"
 
-      SMTP_HOST: smtp.gmail.com
+      # تنظیمات اسکریپت از Secrets
+      BASE_URL: ${{ secrets.BASE_URL }}
+      USERNAME: ${{ secrets.USERNAME }}
+      PASSWORD: ${{ secrets.PASSWORD }}
+
+      SMTP_HOST: "smtp.gmail.com"
       SMTP_PORT: "587"
-      SMTP_USER: oe.snappkitchen@gmail.com
-      SMTP_PASS: ${{ secrets.SMTP_PASS }}   # ⬅️ در Settings > Secrets بنام SMTP_PASS ذخیره کن
-      EMAIL_TO: oe.snappkitchen@gmail.com
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      EMAIL_TO:   ${{ secrets.EMAIL_TO }}
       EMAIL_SUBJECT: "Lego.Web Daily Export"
 
       MENU_REPORT_TEXT: "گزارش بازدیدها"
-      BTN_FETCH_TEXT: "دریافت"
+      BTN_FETCH_TEXT:   "دریافت"
       PLACEHOLDER_FROM: "از تاریخ"
-      PLACEHOLDER_TO: "تا تاریخ"
+      PLACEHOLDER_TO:   "تا تاریخ"
+      EXCEL_BUTTON_TEXTS: "دریافت Excel,Excel دریافت,خروجی Excel,Export Excel,Excel"
 
-      HEADLESS: "1"
-      SLOW_MO_MS: "0"
+      OUT_DIR: ${{ github.workspace }}/out
 
     steps:
       - name: Checkout
@@ -39,29 +44,41 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Python deps
+      - name: Install deps (Playwright + pandas)
         run: |
           python -m pip install --upgrade pip
-          pip install playwright pandas openpyxl
-
-      - name: Install Playwright (Chromium)
-        run: |
+          pip install playwright pandas
           python -m playwright install --with-deps chromium
 
+      - name: Prepare output dir
+        run: mkdir -p "$OUT_DIR"
+
+      # اختیاری: تست SMTP سریع
       - name: SMTP quick test
+        if: ${{ env.SMTP_USER != '' && env.SMTP_PASS != '' && env.EMAIL_TO != '' }}
         run: |
           python - <<'PY'
           import smtplib, os
           from email.message import EmailMessage
-          m=EmailMessage()
-          m['From']=os.environ['SMTP_USER']
-          m['To']=os.environ['EMAIL_TO']
-          m['Subject']='SMTP test from GitHub Actions'
-          m.set_content('This is a one-off test.')
+          msg = EmailMessage()
+          msg['From'] = os.environ['SMTP_USER']
+          msg['To']   = os.environ['EMAIL_TO']
+          msg['Subject'] = 'SMTP test from GitHub Actions'
+          msg.set_content('This is a one-off test.')
           with smtplib.SMTP(os.environ['SMTP_HOST'], int(os.environ['SMTP_PORT'])) as s:
-              s.ehlo(); s.starttls(); s.login(os.environ['SMTP_USER'], os.environ['SMTP_PASS']); s.send_message(m)
+              s.ehlo(); s.starttls(); s.login(os.environ['SMTP_USER'], os.environ['SMTP_PASS']); s.send_message(msg)
           print('SMTP OK')
           PY
 
-      - name: Run python lego_export.py
-        run: python lego_export.py
+      - name: Run python script
+        run: |
+          python lego_export.py
+
+      # اگر فایل یا اسکرین‌شاتی ساخته شد، برای دیباگ ذخیره شود
+      - name: Upload artifacts (out/)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: export-output
+          path: out
+          if-no-files-found: ignore
